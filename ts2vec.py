@@ -7,6 +7,16 @@ from models.losses import hierarchical_contrastive_loss
 from utils import take_per_row, split_with_nan, centerize_vary_length_series, torch_pad_nan
 import math
 
+
+
+def gem(x):
+    x = x**self.p
+    bs,c,h,w = F.shape
+    x = x.sum(dim=(2,3)) * 1. / w / h
+    x = x ** (1. / self.p)
+    return x
+
+
 class TS2Vec:
     '''The TS2Vec model'''
     
@@ -170,16 +180,18 @@ class TS2Vec:
             ).transpose(1, 2)
             
         elif isinstance(encoding_window, int):
-            out = F.max_pool1d(
-                out.transpose(1, 2),
-                kernel_size = encoding_window,
-                stride = 1,
-                padding = encoding_window // 2
-            ).transpose(1, 2)
-            if encoding_window % 2 == 0:
-                out = out[:, :-1]
-            if slicing is not None:
-                out = out[:, slicing]
+            """encoding window is a count of overlapping elements"""
+            ts_l = x.shape[1]
+            padding = encoding_window // 2
+            reprs = []
+            for i in range(0, ts_l, encoding_window):
+                l = i - (encoding_window // 2) - padding
+                r = i + (encoding_window // 2) + padding
+                reprs.append(F.max_pool1d(
+                    out[:, max(l,0):min(r,ts_l)].transpose(1,2),
+                    kernel_size = min(r,ts_l) - max(l,0)
+                ).transpose(1,2))
+            out = torch.cat(reprs, dim=1)
             
         elif encoding_window == 'multiscale':
             p = 0
@@ -294,9 +306,9 @@ class TS2Vec:
                         out = out.squeeze(1)
                         
                 output.append(out)
-                
+
             output = torch.cat(output, dim=0)
-            
+
         self.net.train(org_training)
         return output.numpy()
     
